@@ -1,206 +1,201 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description"
-          content="Web app demonstrating how nearby Bluetooth Low Energy devices that are advertising can be discovered from within a web browser, without the need for a native app!">
-    <link rel="stylesheet" href="style/bootstrap.min.css">
-    <link rel="stylesheet" href="style/reelyactive.css">
-    <title> reelyActive Web BLE Demo </title>
-    <!----- Structured, linked metadata (JSON-LD & Schema.org) ----->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org", 
-      "@type": "WebApplication",
-      "name": "reelyActive Web BLE Demo",
-      "description": "Web app demonstrating how nearby Bluetooth Low Energy devices that are advertising can be discovered from within a web browser, without the need for a native app!",
-      "license": "https://opensource.org/licenses/MIT",
-      "isAccessibleForFree": true,
-      "applicationCategory": "Client-side",
-      "browserRequirements": "Requires a browser that supports Web Bluetooth and the experimental scanning feature.",
-      "image": "https://reelyactive.github.io/web-ble-demo/images/header.jpg",
-      "author": {
-        "@type": "Organization",
-        "url": "https://www.reelyactive.com"
-      }
+<!--
+  Rui Santos
+  Complete project details at https://RandomNerdTutorials.com/esp32-web-bluetooth/
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+-->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 Web BLE App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="">
+</head>
+<body>
+  <h1>ESP32 Web BLE Application</h1>
+  <button id="connectBleButton">Connect to BLE Device</button>
+  <button id="disconnectBleButton">Disconnect BLE Device</button>
+  <p>BLE state: <strong><span id="bleState" style="color:#d13a30;">Disconnected</span></strong></p>
+  <h2>Fetched Value</h2>
+  <p><span id="valueContainer">NaN</span></p>
+  <p>Last reading: <span id="timestamp"></span></p>
+  <h2>Control GPIO 2</h2>
+  <button id="onButton">ON</button>
+  <button id="offButton">OFF</button>
+  <p>Last value sent: <span id="valueSent"></span></p>
+  <p><a href="https://randomnerdtutorials.com/">Created by RandomNerdTutorials.com</a></p>
+  <p><a href="https://RandomNerdTutorials.com/esp32-web-bluetooth/">Read the full project here.</a></p>
+</body>
+<script>
+    // DOM Elements
+    const connectButton = document.getElementById('connectBleButton');
+    const disconnectButton = document.getElementById('disconnectBleButton');
+    const onButton = document.getElementById('onButton');
+    const offButton = document.getElementById('offButton');
+    const retrievedValue = document.getElementById('valueContainer');
+    const latestValueSent = document.getElementById('valueSent');
+    const bleStateContainer = document.getElementById('bleState');
+    const timestampContainer = document.getElementById('timestamp');
+
+    //Define BLE Device Specs
+    var deviceName ='ESP32';
+    var bleService = '19b10000-e8f2-537e-4f6c-d104768a1214';
+    var ledCharacteristic = '19b10002-e8f2-537e-4f6c-d104768a1214';
+    var sensorCharacteristic= '19b10001-e8f2-537e-4f6c-d104768a1214';
+
+    //Global Variables to Handle Bluetooth
+    var bleServer;
+    var bleServiceFound;
+    var sensorCharacteristicFound;
+
+    // Connect Button (search for BLE Devices only if BLE is available)
+    connectButton.addEventListener('click', (event) => {
+        if (isWebBluetoothEnabled()){
+            connectToDevice();
+        }
+    });
+
+    // Disconnect Button
+    disconnectButton.addEventListener('click', disconnectDevice);
+
+    // Write to the ESP32 LED Characteristic
+    onButton.addEventListener('click', () => writeOnCharacteristic(1));
+    offButton.addEventListener('click', () => writeOnCharacteristic(0));
+
+    // Check if BLE is available in your Browser
+    function isWebBluetoothEnabled() {
+        if (!navigator.bluetooth) {
+            console.log("Web Bluetooth API is not available in this browser!");
+            bleStateContainer.innerHTML = "Web Bluetooth API is not available in this browser!";
+            return false
+        }
+        console.log('Web Bluetooth API supported in this browser.');
+        return true
     }
-    </script>
-  </head>
-  <body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-reelyactive bg-reelyactive">
-      <a class="navbar-brand" href="https://www.reelyactive.com/">
-        <img src="images/reelyactive-logo-nav.png" width="165" height="30"
-             alt="reelyActive">
-      </a>
-      <button class="navbar-toggler" type="button" data-toggle="collapse"
-              data-target="#navbarItems" aria-controls="navbarItems"
-              aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarItems">
-        <!-- Left-aligned navigation items -->
-        <ul class="navbar-nav mr-auto"></ul>
-        <!-- Right-aligned navigation items -->
-        <ul class="navbar-nav">
-          <li class="nav-item">
-            <!-- Link to home -->
-            <a class="nav-link"
-               href="https://reelyactive.github.io/web-ble-demo/">
-              <i class="fas fa-home"></i>
-            </a>
-          </li>
-          <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" id="navbarDropdown"
-               role="button" data-toggle="dropdown" aria-haspopup="true"
-               aria-expanded="false">
-              <i class="fas fa-question-circle"></i>
-            </a>
-            <!-- Info about tracking and open source software/licenses -->
-            <div class="dropdown-menu dropdown-menu-right"
-                 aria-labelledby="navbarDropdown">
-              <a class="dropdown-item"
-                 href="https://www.reelyactive.com/how-we-observe/#digital">
-                <i class="fas fa-mouse-pointer"></i>
-                Behaviour tracking free &nbsp;
-                <span class="badge badge-success">
-                  <i class="fas fa-user-shield"></i>
-                </span>
-              </a>
-              <div class="dropdown-divider"></div>
-              <a class="dropdown-item" target="_blank"
-                 href="https://getbootstrap.com" >
-                <i class="fab fa-bootstrap"></i>
-                Bootstrap 4 &nbsp;
-                <span class="badge badge-light">
-                  <i class="fab fa-osi"></i> MIT
-                </span>
-              </a>
-              <a class="dropdown-item" target="_blank"
-                 href="https://fontawesome.com" >
-                <i class="fab fa-font-awesome"></i>
-                Font Awesome (Free) &nbsp;
-                <span class="badge badge-light">
-                  <i class="fab fa-creative-commons"></i>
-                  <i class="fab fa-osi"></i> MIT
-                </span>
-              </a>
-              <a class="dropdown-item" target="_blank"
-                 href="https://jquery.com" >
-                <i class="fab fa-js"></i>
-                JQuery &nbsp;
-                <span class="badge badge-light">
-                  <i class="fab fa-osi"></i> MIT
-                </span>
-              </a>
-              <a class="dropdown-item" target="_blank"
-                 href="https://github.com/reelyactive/web-style-guide/" >
-                <i class="fas fa-code"></i>
-                Web Style Guide &nbsp;
-                <span class="badge badge-light">
-                  <i class="fab fa-osi"></i> MIT
-                </span>
-              </a>
-              <div class="dropdown-divider"></div>
-              <a class="dropdown-item" target="_blank"
-                 href="https://www.reelyactive.com/made-in-montreal/" >
-                <i class="fab fa-canadian-maple-leaf"></i>
-                Made in Montr&eacute;al &nbsp;
-                <i class="fas fa-city"></i>
-              </a>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </nav>
-    <!-- Content -->
-    <div class="container-fluid">
-      <div class="row justify-content-center">
-        <div class="col-sm-12 col-md-10 col-lg-8 col-xl-6">
-          <h1 class="mt-4"> reelyActive Web BLE Demo </h1>
-          <p class="lead"> Scan for nearby advertising <i class="fab fa-bluetooth"></i> Bluetooth devices from the web browser </p>
-          <p class="text-center my-4">
-            <button type="button" class="btn btn-primary"
-                    id="scanButton"> Scan </button>
-            <button type="button" class="btn btn-outline-dark"
-                    id="stopButton" disabled> Stop </button>
-          </p>
-          <div class="alert alert-dark" role="alert" id="scanAlert" hidden>
-          </div>
-        </div>
-      </div>
-      <div class="row justify-content-center">
-        <div class="col-sm-12 col-md-10 col-lg-8 col-xl-6 my-4">
-          <table class="table table-sm table-hover" id="devices">
-            <caption> List of detected devices in decreasing order of signal strength </caption>
-            <thead class="thead-reelyactive">
-              <tr class="text-center">
-                <th> <i class="fas fa-barcode"></i> transmitterId * </th>
-                <th> <i class="fas fa-signal"></i> rssi </th>
-                <th> <i class="fas fa-info-circle"></i> dec </th>
-                <th> <i class="fas fa-clock"></i> timestamp </th>
-              </tr>
-            </thead>
-            <tbody id="devicestbody">
-            </tbody>
-          </table>
-          <p><small class="text-muted"> * the transmitterID is not the 48-bit Bluetooth advertiser address but rather a <a href="https://webbluetoothcg.github.io/web-bluetooth/#bluetooth-device-identifiers" target="_blank">128-bit Identity Resolving Key</a>. </small></p>
-        </div>
-      </div>
-      <div class="row justify-content-center">
-        <div class="col-sm-12 col-md-10 col-lg-8 col-xl-6 my-4">
-          <h2> Prerequisites </h2>
-          <p class="lead"> Web Bluetooth Scanning is an experimental feature </p>
-          <p> The Web Bluetooth Scanning feature demonstrated here is available only in <em>specific</em> browsers under <em>specific</em> conditions, as to be expected given that: </p>
-          <blockquote class="blockquote mb-4">
-            <p class="mb-0"> [Web Bluetooth Scanning] is not a W3C Standard nor is it on the W3C Standards Track </p>
-            <footer class="blockquote-footer">04 11 19 &nbsp; <cite title="Web Bluetooth Scanning Draft Community Group Report"> Draft Community Group Report </cite> &nbsp; <a href="https://webbluetoothcg.github.io/web-bluetooth/scanning.html" target="_blank"><i class="fas fa-external-link-alt"></i></a></footer>
-          </blockquote>
-          <ul class="nav nav-tabs" role="tablist">
-            <li class="nav-item">
-              <a class="nav-link active" id="chrometab" data-toggle="tab"
-                 href="#chromecontent" role="tab" aria-controls="chromecontent"
-                 aria-selected="true"> <i class="fab fa-chrome"></i> Chrome </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" id="otherstab" data-toggle="tab"
-                 href="#otherscontent" role="tab" aria-controls="otherscontent"
-                 aria-selected="false"> Other Browsers </a>
-            </li>
-          </ul>
-          <div class="tab-content tab-content-reelyactive">
-            <div class="tab-pane fade show active" id="chromecontent"
-                 role="tabpanel" aria-labelledby="chrometab">
-              <p> <i class="fab fa-chrome"></i> Chrome/Chromium version 79+ supports Web Bluetooth Scanning on <i class="fab fa-android"></i> Android and <i class="fas fa-laptop"></i> desktop.  Check your version by browsing to: </p>
-              <p class="monospace"> chrome://version </p>
-              <p> The <em>Experimental Web Platform features</em> flag must be enabled for Web Bluetooth support.  Enable this feature by browsing to: </p>
-              <p class="monospace"> chrome://flags/#enable-experimental-web-platform-features </p>
-              <img src="images/chrome-flags-web-bluetooth.png" class="img-fluid mx-auto d-block mb-2">
-              <p> Under this configuration, Web Bluetooth Scanning may nonetheless not function due to OS or hardware constraints.  Verify the Bluetooth adapter status by browsing to: </p>
-              <p class="monospace"> chrome://bluetooth-internals/#adapter </p>
-            </div>
-            <div class="tab-pane fade" id="otherscontent" role="tabpanel"
-                 aria-labelledby="otherstab">
-              <p> <i class="fab fa-chrome"></i> Chrome/Chromium is the only browser successfully tested to date.  See the Web Bluetooth Community Group <a href="https://github.com/WebBluetoothCG/web-bluetooth/blob/master/implementation-status.md" target="_blank">Implementation Status</a> for updates. </p>
-              <p> On the <i class="fab fa-opera"></i> Opera browser, if the functionality becomes available, it will likely be behind a flag: </p>
-              <p class="monospace"> opera://flags/#enable-web-bluetooth </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <footer class="footer">
-      <a href="https://github.com/reelyactive/web-ble-demo"> web-ble-demo </a>
-      &nbsp; | &nbsp;
-      <a href="https://www.reelyactive.com"> &copy; reelyActive 2016-2020 </a>
-    </footer>
-    <script defer src="js/solid.min.js"></script>
-    <script defer src="js/brands.min.js"></script>
-    <script defer src="js/fontawesome.min.js"></script>
-    <script src="js/jquery-3.4.0.min.js"></script>
-    <script src="js/bootstrap.bundle.min.js"></script>
-    <script src="js/webble.js"></script>
-  </body>
+
+    // Connect to BLE Device and Enable Notifications
+    function connectToDevice(){
+        console.log('Initializing Bluetooth...');
+        navigator.bluetooth.requestDevice({
+            filters: [{name: deviceName}],
+            optionalServices: [bleService]
+        })
+        .then(device => {
+            console.log('Device Selected:', device.name);
+            bleStateContainer.innerHTML = 'Connected to device ' + device.name;
+            bleStateContainer.style.color = "#24af37";
+            device.addEventListener('gattservicedisconnected', onDisconnected);
+            return device.gatt.connect();
+        })
+        .then(gattServer =>{
+            bleServer = gattServer;
+            console.log("Connected to GATT Server");
+            return bleServer.getPrimaryService(bleService);
+        })
+        .then(service => {
+            bleServiceFound = service;
+            console.log("Service discovered:", service.uuid);
+            return service.getCharacteristic(sensorCharacteristic);
+        })
+        .then(characteristic => {
+            console.log("Characteristic discovered:", characteristic.uuid);
+            sensorCharacteristicFound = characteristic;
+            characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicChange);
+            characteristic.startNotifications();
+            console.log("Notifications Started.");
+            return characteristic.readValue();
+        })
+        .then(value => {
+            console.log("Read value: ", value);
+            const decodedValue = new TextDecoder().decode(value);
+            console.log("Decoded value: ", decodedValue);
+            retrievedValue.innerHTML = decodedValue;
+        })
+        .catch(error => {
+            console.log('Error: ', error);
+        })
+    }
+
+    function onDisconnected(event){
+        console.log('Device Disconnected:', event.target.device.name);
+        bleStateContainer.innerHTML = "Device disconnected";
+        bleStateContainer.style.color = "#d13a30";
+
+        connectToDevice();
+    }
+
+    function handleCharacteristicChange(event){
+        const newValueReceived = new TextDecoder().decode(event.target.value);
+        console.log("Characteristic value changed: ", newValueReceived);
+        retrievedValue.innerHTML = newValueReceived;
+        timestampContainer.innerHTML = getDateTime();
+    }
+
+    function writeOnCharacteristic(value){
+        if (bleServer && bleServer.connected) {
+            bleServiceFound.getCharacteristic(ledCharacteristic)
+            .then(characteristic => {
+                console.log("Found the LED characteristic: ", characteristic.uuid);
+                const data = new Uint8Array([value]);
+                return characteristic.writeValue(data);
+            })
+            .then(() => {
+                latestValueSent.innerHTML = value;
+                console.log("Value written to LEDcharacteristic:", value);
+            })
+            .catch(error => {
+                console.error("Error writing to the LED characteristic: ", error);
+            });
+        } else {
+            console.error ("Bluetooth is not connected. Cannot write to characteristic.")
+            window.alert("Bluetooth is not connected. Cannot write to characteristic. \n Connect to BLE first!")
+        }
+    }
+
+    function disconnectDevice() {
+        console.log("Disconnect Device.");
+        if (bleServer && bleServer.connected) {
+            if (sensorCharacteristicFound) {
+                sensorCharacteristicFound.stopNotifications()
+                    .then(() => {
+                        console.log("Notifications Stopped");
+                        return bleServer.disconnect();
+                    })
+                    .then(() => {
+                        console.log("Device Disconnected");
+                        bleStateContainer.innerHTML = "Device Disconnected";
+                        bleStateContainer.style.color = "#d13a30";
+
+                    })
+                    .catch(error => {
+                        console.log("An error occurred:", error);
+                    });
+            } else {
+                console.log("No characteristic found to disconnect.");
+            }
+        } else {
+            // Throw an error if Bluetooth is not connected
+            console.error("Bluetooth is not connected.");
+            window.alert("Bluetooth is not connected.")
+        }
+    }
+
+    function getDateTime() {
+        var currentdate = new Date();
+        var day = ("00" + currentdate.getDate()).slice(-2); // Convert day to string and slice
+        var month = ("00" + (currentdate.getMonth() + 1)).slice(-2);
+        var year = currentdate.getFullYear();
+        var hours = ("00" + currentdate.getHours()).slice(-2);
+        var minutes = ("00" + currentdate.getMinutes()).slice(-2);
+        var seconds = ("00" + currentdate.getSeconds()).slice(-2);
+
+        var datetime = day + "/" + month + "/" + year + " at " + hours + ":" + minutes + ":" + seconds;
+        return datetime;
+    }
+
+
+</script>
+
 </html>
